@@ -1,0 +1,30 @@
+{
+  "name": "example — Projector 4/6, emotional authority",
+  "tags": ["projector", "emotional", "ussr-tz"],
+  "verified_with": ["calculator A (url)", "calculator B (url)"],
+  "note": "Why this case matters. Files starting with _ are ignored by the test.",
+  "request": {
+    "birth_local": "1984-04-01T03:30",
+    "tz": "Europe/Moscow",
+    "lat": 55.7558,
+    "lon": 37.6173
+  },
+  "expect": {
+    "birth_utc": "1984-03-31T23:30:00Z",
+    "type": "projector",
+    "authority": "emotional",
+    "profile": "4/6",
+    "definition": "single",
+    "incarnation_cross": "right_angle:1/2|7/13",
+    "defined_centers": ["g", "solar_plexus", "throat"],
+    "channels": ["12-22", "1-8"],
+    "personality": {
+      "sun": "1.4", "earth": "2.4", "north_node": "0.0", "south_node": "0.0",
+      "moon": "0.0", "mercury": "0.0", "venus": "0.0", "mars": "0.0",
+      "jupiter": "0.0", "saturn": "0.0", "uranus": "0.0", "neptune": "0.0", "pluto": "0.0"
+    },
+    "design": {
+      "sun": "7.6", "earth": "13.6"
+    }
+  }
+}

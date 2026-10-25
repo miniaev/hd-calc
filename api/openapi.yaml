@@ -1,0 +1,577 @@
+openapi: 3.1.0
+info:
+  title: Prisma calc-service
+  version: 0.2.0
+  summary: Расчёт карт Human Design. Чистая функция, без состояния.
+  description: |
+    Контракт между закрытым основным бэкендом Prisma и AGPL-сервисом расчёта
+    (см. docs/adr/0001-calc-engine-agpl-microservice.md).
+
+    Источник истины — этот файл в основном репозитории. Любая реализация движка
+    (Swiss Ephemeris, коммерческая лицензия, свой движок) обязана соответствовать
+    ему и проходить golden-тесты.
+
+    Соглашения:
+    - Все ответы — ключи элементов, без человеческих текстов.
+    - На вход — локальное время, как его ввёл человек (`YYYY-MM-DDTHH:MM[:SS]`
+      без смещения), плюс IANA-зона в отдельном поле. Перевод в UTC по
+      исторической tzdb делает этот сервис, и только он; UTC возвращается в ответе.
+    - Время в ответах — UTC, RFC 3339 с `Z`.
+    - Перевод часов. Двойное локальное время (перевод назад) трактуется по
+      раннему смещению, то есть первое из двух; несуществующее (перевод вперёд)
+      сдвигается вперёд на размер скачка. В обоих случаях в `warnings` пишется
+      предупреждение.
+    - Долготы — тропическая геоцентрическая эклиптика, градусы [0, 360).
+    - Канал обозначается воротами по возрастанию: `"20-34"`, а не `"34-20"`.
+      Порядок для показа — забота фронтенда.
+    - Каждый ответ с результатом расчёта содержит `engine_version`.
+  license:
+    name: AGPL-3.0-only (реализация calc-service); сам контракт — собственность Prisma
+
+servers:
+  - url: http://calc:8080
+    description: Внутри docker-сети. Наружу сервис не публикуется.
+
+# Авторизации нет намеренно: сервис доступен только из docker-сети основного бэкенда.
+security: []
+
+paths:
+  /v1/chart:
+    post:
+      operationId: calculateChart
+      summary: Карта по моменту рождения
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChartRequest' }
+            example:
+              birth_local: '1990-05-14T03:20'
+              tz: Europe/Moscow
+              lat: 55.7558
+              lon: 37.6173
+      responses:
+        '200':
+          description: Рассчитанная карта
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Chart' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/chart/range:
+    post:
+      operationId: calculateChartRange
+      summary: Что в карте меняется внутри интервала неточного времени рождения
+      description: |
+        Сервис переводит границы интервала из локального времени в UTC, считает
+        карту с шагом `step_minutes` и уточняет каждую точку смены бисекцией до
+        1 минуты. Возвращает только элементы, у которых внутри интервала больше
+        одного значения. Всё, чего нет в `varying`, стабильно, и его можно взять
+        из карты на любой момент интервала.
+
+        Переход на летнее время на границах интервала: двойное локальное время
+        расширяет интервал — `from` берётся по раннему смещению, `to` — по
+        позднему; несуществующее сдвигается вперёд на размер скачка. В обоих
+        случаях в `warnings` добавляется запись.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ChartRangeRequest' }
+            example:
+              birth_local_from: '1990-05-14T02:00'
+              birth_local_to: '1990-05-14T06:00'
+              tz: Europe/Moscow
+              lat: 55.7558
+              lon: 37.6173
+              step_minutes: 5
+      responses:
+        '200':
+          description: Меняющиеся элементы карты
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChartRange' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/transits:
+    get:
+      operationId: getTransits
+      summary: Транзитные активации на момент
+      parameters:
+        - name: at
+          in: query
+          required: true
+          schema: { type: string, format: date-time }
+          example: '2026-10-25T00:00:00Z'
+      responses:
+        '200':
+          description: Положения тел и активированные ими ворота
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Transits' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/transits/overlay:
+    post:
+      operationId: overlayTransits
+      summary: Что транзиты на момент делают с картой
+      description: |
+        Объединяет ворота карты с транзитными и возвращает то, чего в карте
+        самой по себе нет: каналы, которые транзит замыкает, и центры, которые
+        он временно определяет. Тексты «Сегодня» основной бэкенд подбирает
+        по этим ключам (ТЗ §6).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransitOverlayRequest' }
+            example:
+              at: '2026-10-25T00:00:00Z'
+              chart_gates: [1, 2, 13, 20, 25, 41, 46, 57]
+      responses:
+        '200':
+          description: Изменения карты под транзитом
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransitOverlay' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/version:
+    get:
+      operationId: getVersion
+      summary: Версия движка и ссылка на исходный код (для футера, требование AGPL)
+      responses:
+        '200':
+          description: Версия
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Version' }
+
+  /healthz:
+    get:
+      operationId: health
+      summary: Живость сервиса
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema: { type: string, const: ok }
+
+components:
+  responses:
+    BadRequest:
+      description: Некорректный запрос (формат, обязательные поля, диапазоны)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unprocessable:
+      description: Запрос корректен, но не считается (дата вне эфемерид, слишком длинный интервал, неизвестная зона)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    # ---------- запросы ----------
+    ChartRequest:
+      type: object
+      required: [birth_local, tz]
+      additionalProperties: false
+      properties:
+        birth_local:
+          $ref: '#/components/schemas/LocalDateTime'
+          description: Время рождения, как его ввёл человек.
+        tz: { $ref: '#/components/schemas/TimeZone' }
+        lat: { $ref: '#/components/schemas/Latitude' }
+        lon: { $ref: '#/components/schemas/Longitude' }
+
+    ChartRangeRequest:
+      type: object
+      required: [birth_local_from, birth_local_to, tz]
+      additionalProperties: false
+      properties:
+        birth_local_from: { $ref: '#/components/schemas/LocalDateTime' }
+        birth_local_to:
+          $ref: '#/components/schemas/LocalDateTime'
+          description: Не раньше `birth_local_from`. Интервал не длиннее 24 часов (случай «не знаю» — целые сутки).
+        tz: { $ref: '#/components/schemas/TimeZone' }
+        lat: { $ref: '#/components/schemas/Latitude' }
+        lon: { $ref: '#/components/schemas/Longitude' }
+        step_minutes:
+          type: integer
+          minimum: 1
+          maximum: 60
+          default: 5
+          description: Шаг грубого перебора. Точки смены всё равно уточняются до 1 минуты.
+
+    # ---------- карта ----------
+    Chart:
+      type: object
+      required: [engine_version, tzdb_version, input, birth_utc, warnings, personality,
+                 design, gates, channels, centers, type, authority, profile, definition,
+                 incarnation_cross]
+      properties:
+        engine_version: { $ref: '#/components/schemas/EngineVersion' }
+        tzdb_version:
+          type: string
+          description: Версия базы часовых поясов, по которой локальное время переведено в UTC.
+          example: 2026b
+        input:
+          $ref: '#/components/schemas/ChartRequest'
+          description: Эхо входа, чтобы ответ можно было хранить сам по себе.
+        birth_utc:
+          type: string
+          format: date-time
+          description: Момент рождения в UTC, полученный из `birth_local` + `tz`.
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/TimeWarning' }
+        personality: { $ref: '#/components/schemas/ActivationSet' }
+        design:
+          $ref: '#/components/schemas/ActivationSet'
+          description: Момент, когда Солнце было на 88° эклиптики раньше, чем при рождении.
+        gates:
+          type: array
+          description: Все активированные ворота по возрастанию номера, с источниками активации.
+          items: { $ref: '#/components/schemas/ActiveGate' }
+        channels:
+          type: array
+          description: Определённые каналы (оба ворот активированы).
+          items: { $ref: '#/components/schemas/Channel' }
+        centers: { $ref: '#/components/schemas/Centers' }
+        type: { $ref: '#/components/schemas/HDType' }
+        authority: { $ref: '#/components/schemas/Authority' }
+        profile: { $ref: '#/components/schemas/Profile' }
+        definition: { $ref: '#/components/schemas/Definition' }
+        incarnation_cross: { $ref: '#/components/schemas/IncarnationCross' }
+
+    ActivationSet:
+      type: object
+      required: [utc, activations]
+      properties:
+        utc: { type: string, format: date-time }
+        activations:
+          type: array
+          minItems: 13
+          maxItems: 13
+          description: По одной активации на каждое тело, в порядке перечисления `Body`.
+          items: { $ref: '#/components/schemas/Activation' }
+
+    Activation:
+      type: object
+      required: [body, longitude, gate, line, color, tone, base]
+      properties:
+        body: { $ref: '#/components/schemas/Body' }
+        longitude:
+          type: number
+          minimum: 0
+          exclusiveMaximum: 360
+          description: Тропическая геоцентрическая долгота, градусы.
+        gate: { $ref: '#/components/schemas/Gate' }
+        line: { type: integer, minimum: 1, maximum: 6 }
+        color: { type: integer, minimum: 1, maximum: 6 }
+        tone: { type: integer, minimum: 1, maximum: 6 }
+        base: { type: integer, minimum: 1, maximum: 5 }
+
+    ActiveGate:
+      type: object
+      required: [gate, sources]
+      properties:
+        gate: { $ref: '#/components/schemas/Gate' }
+        sources:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [side, body, line]
+            properties:
+              side: { $ref: '#/components/schemas/Side' }
+              body: { $ref: '#/components/schemas/Body' }
+              line: { type: integer, minimum: 1, maximum: 6 }
+
+    Channel:
+      type: object
+      required: [id, gates, centers]
+      properties:
+        id: { $ref: '#/components/schemas/ChannelId' }
+        gates:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: { $ref: '#/components/schemas/Gate' }
+        centers:
+          type: array
+          minItems: 2
+          maxItems: 2
+          items: { $ref: '#/components/schemas/Center' }
+
+    Centers:
+      type: object
+      description: Определён ли центр (true) или открыт (false).
+      required: [head, ajna, throat, g, heart, sacral, solar_plexus, spleen, root]
+      additionalProperties: false
+      properties:
+        head: { type: boolean }
+        ajna: { type: boolean }
+        throat: { type: boolean }
+        g: { type: boolean }
+        heart: { type: boolean, description: Эго / Сердце }
+        sacral: { type: boolean }
+        solar_plexus: { type: boolean, description: Эмоциональный центр }
+        spleen: { type: boolean }
+        root: { type: boolean }
+
+    Profile:
+      type: object
+      required: [personality_line, design_line]
+      properties:
+        personality_line: { type: integer, minimum: 1, maximum: 6 }
+        design_line: { type: integer, minimum: 1, maximum: 6 }
+      example: { personality_line: 4, design_line: 6 }
+
+    IncarnationCross:
+      type: object
+      required: [angle, personality_sun, personality_earth, design_sun, design_earth]
+      description: Название креста — текст, его подбирает основной бэкенд по этим ключам.
+      properties:
+        angle: { type: string, enum: [right_angle, juxtaposition, left_angle] }
+        personality_sun: { $ref: '#/components/schemas/Gate' }
+        personality_earth: { $ref: '#/components/schemas/Gate' }
+        design_sun: { $ref: '#/components/schemas/Gate' }
+        design_earth: { $ref: '#/components/schemas/Gate' }
+
+    # ---------- интервал ----------
+    ChartRange:
+      type: object
+      required: [engine_version, tzdb_version, from_utc, to_utc, step_minutes, varying, warnings]
+      properties:
+        engine_version: { $ref: '#/components/schemas/EngineVersion' }
+        tzdb_version: { type: string, example: 2026b }
+        from_utc: { type: string, format: date-time }
+        to_utc: { type: string, format: date-time }
+        step_minutes: { type: integer }
+        varying:
+          type: array
+          description: Пусто — карта во всём интервале одинакова.
+          items: { $ref: '#/components/schemas/ElementVariation' }
+        warnings:
+          type: array
+          items: { $ref: '#/components/schemas/TimeWarning' }
+
+    ElementVariation:
+      type: object
+      required: [element, segments]
+      properties:
+        element:
+          type: string
+          description: |
+            Ключ элемента:
+            - `type`, `authority`, `profile`, `definition`, `incarnation_cross`
+            - `center.<Center>` — например `center.spleen`
+            - `channel.<ChannelId>` — например `channel.20-34`
+            - `activation.<Side>.<Body>` — например `activation.personality.moon`
+          example: authority
+        segments:
+          type: array
+          minItems: 2
+          description: Подряд идущие отрезки интервала с постоянным значением элемента.
+          items: { $ref: '#/components/schemas/Segment' }
+
+    Segment:
+      type: object
+      required: [value, from_utc, to_utc, from_local, to_local]
+      properties:
+        value:
+          type: string
+          description: |
+            Значение элемента в виде строки:
+            - для `type`, `authority`, `definition` — ключ перечисления (`emotional`);
+            - для `profile` — `"4/6"`;
+            - для `incarnation_cross` — `"<angle>:<pSun>/<pEarth>|<dSun>/<dEarth>"`;
+            - для `center.*` — `defined` или `open`;
+            - для `channel.*` — `defined` или `undefined`;
+            - для `activation.*` — `"<gate>.<line>"`.
+          example: emotional
+        from_utc: { type: string, format: date-time }
+        to_utc: { type: string, format: date-time }
+        from_local: { $ref: '#/components/schemas/LocalDateTime' }
+        to_local: { $ref: '#/components/schemas/LocalDateTime' }
+
+    TimeWarning:
+      type: object
+      required: [code, local]
+      properties:
+        code: { type: string, enum: [ambiguous_local_time, nonexistent_local_time] }
+        local: { $ref: '#/components/schemas/LocalDateTime' }
+
+    # ---------- транзиты ----------
+    Transits:
+      type: object
+      required: [engine_version, at, activations, gates, channels]
+      properties:
+        engine_version: { $ref: '#/components/schemas/EngineVersion' }
+        at: { type: string, format: date-time }
+        activations:
+          type: array
+          minItems: 13
+          maxItems: 13
+          items: { $ref: '#/components/schemas/Activation' }
+        gates:
+          type: array
+          description: Активированные транзитом ворота, по возрастанию, без повторов.
+          items: { $ref: '#/components/schemas/Gate' }
+        channels:
+          type: array
+          description: Каналы, которые транзит замыкает сам, без карты пользователя.
+          items: { $ref: '#/components/schemas/ChannelId' }
+
+    TransitOverlayRequest:
+      type: object
+      required: [at, chart_gates]
+      additionalProperties: false
+      properties:
+        at: { type: string, format: date-time }
+        chart_gates:
+          type: array
+          description: Ворота карты — номера из `Chart.gates[].gate`.
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Gate' }
+
+    TransitOverlay:
+      type: object
+      required: [engine_version, at, transit_gates, completed_channels, defined_centers]
+      properties:
+        engine_version: { $ref: '#/components/schemas/EngineVersion' }
+        at: { type: string, format: date-time }
+        transit_gates:
+          type: array
+          items: { $ref: '#/components/schemas/Gate' }
+        completed_channels:
+          type: array
+          description: Каналы, определённые под транзитом, но не в самой карте.
+          items:
+            type: object
+            required: [id, chart_gates, transit_gates]
+            properties:
+              id: { $ref: '#/components/schemas/ChannelId' }
+              chart_gates:
+                type: array
+                description: Ворота канала, которые есть в карте (0 или 1 — если оба, канал уже определён в карте и сюда не попадает).
+                items: { $ref: '#/components/schemas/Gate' }
+              transit_gates:
+                type: array
+                description: Какие ворота канала дал транзит.
+                items: { $ref: '#/components/schemas/Gate' }
+        defined_centers:
+          type: array
+          description: Центры, открытые в карте и временно определённые под транзитом.
+          items: { $ref: '#/components/schemas/Center' }
+
+    # ---------- служебное ----------
+    Version:
+      type: object
+      required: [engine_version, ephemeris, tzdb_version, source_url]
+      properties:
+        engine_version: { $ref: '#/components/schemas/EngineVersion' }
+        ephemeris:
+          type: object
+          required: [name, version]
+          properties:
+            name: { type: string, example: swisseph }
+            version: { type: string, example: 2.10.03 }
+        supported_range:
+          type: object
+          description: Диапазон дат, который покрывают подключённые файлы эфемерид.
+          properties:
+            from_utc: { type: string, format: date-time }
+            to_utc: { type: string, format: date-time }
+        tzdb_version: { type: string, example: 2026b }
+        source_url:
+          type: string
+          format: uri
+          description: Публичный репозиторий именно этой версии (тег). Ссылку показывает футер.
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [invalid_input, out_of_ephemeris_range, interval_too_long, unknown_timezone, internal]
+        message:
+          type: string
+          description: Для логов и разработчика, не для показа пользователю.
+
+    # ---------- примитивы ----------
+    EngineVersion:
+      type: string
+      description: '`<semver расчёта>/<id эфемерид>`. Меняется при любом изменении, которое может поменять результат.'
+      pattern: '^\d+\.\d+\.\d+/[a-z0-9.\-]+$'
+      example: 0.1.0/swisseph-2.10.03
+
+    LocalDateTime:
+      type: string
+      description: Локальное время без смещения.
+      pattern: '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$'
+      example: '1990-05-14T03:20'
+
+    TimeZone:
+      type: string
+      description: Зона IANA tzdb, например `Europe/Moscow`, `Asia/Yekaterinburg`.
+      example: Europe/Samara
+
+    Latitude:
+      type: number
+      minimum: -90
+      maximum: 90
+      description: |
+        Необязательна. На геоцентрический расчёт ворот не влияет — сохраняется в
+        ответе и зарезервирована под будущие расчёты, зависящие от места
+        (вопрос открыт, см. ADR 0001).
+    Longitude:
+      type: number
+      minimum: -180
+      maximum: 180
+      description: Необязательна, см. `Latitude`.
+
+    Gate: { type: integer, minimum: 1, maximum: 64 }
+
+    ChannelId:
+      type: string
+      description: Ворота по возрастанию через дефис.
+      pattern: '^\d{1,2}-\d{1,2}$'
+      example: 20-34
+
+    Side:
+      type: string
+      enum: [personality, design]
+
+    Body:
+      type: string
+      enum: [sun, earth, north_node, south_node, moon, mercury, venus, mars,
+             jupiter, saturn, uranus, neptune, pluto]
+
+    Center:
+      type: string
+      enum: [head, ajna, throat, g, heart, sacral, solar_plexus, spleen, root]
+
+    HDType:
+      type: string
+      enum: [generator, manifesting_generator, projector, manifestor, reflector]
+
+    Authority:
+      type: string
+      description: |
+        `ego_manifested` / `ego_projected` — авторитет Эго у Манифестора и у
+        Проектора; `self_projected` — авторитет G-центра; `mental` — ментальный
+        (окружение) у Проектора; `lunar` — лунный цикл у Рефлектора.
+      enum: [emotional, sacral, splenic, ego_manifested, ego_projected,
+             self_projected, mental, lunar]
+
+    Definition:
+      type: string
+      enum: [none, single, split, triple_split, quadruple_split]
