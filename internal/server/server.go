@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/miniaev/hd-calc/internal/ephemeris"
 	"github.com/miniaev/hd-calc/internal/hd"
 )
 
@@ -54,15 +55,24 @@ func (s *server) chart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	c, err := s.cfg.Engine.Chart(req)
-	if errors.Is(err, hd.ErrNotImplemented) {
-		notImplemented(w, r)
-		return
-	}
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+		writeEngineError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, c)
+}
+
+func writeEngineError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, hd.ErrInvalidInput):
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
+	case errors.Is(err, hd.ErrUnknownTimezone):
+		writeError(w, http.StatusUnprocessableEntity, "unknown_timezone", err.Error())
+	case errors.Is(err, ephemeris.ErrOutOfRange):
+		writeError(w, http.StatusUnprocessableEntity, "out_of_ephemeris_range", err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, "internal", err.Error())
+	}
 }
 
 func notImplemented(w http.ResponseWriter, _ *http.Request) {

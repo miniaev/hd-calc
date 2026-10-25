@@ -13,6 +13,6 @@ RUN apk add --no-cache tzdata \
  && echo "TZDB_VERSION=$(head -1 /usr/share/zoneinfo/tzdata.zi | awk '{print $3}')" > /etc/tzdb.env
 WORKDIR /app
 COPY --from=build /out/hd-calc /app/hd-calc
-# COPY ephe/ /app/ephe/   # Swiss Ephemeris .se1 files — once vendored
+COPY ephe/ /app/ephe/
 EXPOSE 8080
 CMD ["sh", "-c", ". /etc/tzdb.env && export TZDB_VERSION && exec /app/hd-calc"]

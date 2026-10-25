@@ -1,0 +1,14 @@
+{
+  "name": "Ra Uru Hu (Alan Krakower), founder of the system",
+  "tags": ["manifestor", "splenic", "public"],
+  "verified_with": ["widely published chart: 5/1 Manifestor, splenic, Left Angle Cross of the Clarion"],
+  "note": "Only the publicly known summary is pinned; gate.line values await the cross-check.",
+  "request": { "birth_local": "1948-04-09T00:14", "tz": "America/Toronto" },
+  "expect": {
+    "birth_utc": "1948-04-09T05:14:00Z",
+    "type": "manifestor",
+    "authority": "splenic",
+    "profile": "5/1",
+    "incarnation_cross": "left_angle:51/57|61/62"
+  }
+}

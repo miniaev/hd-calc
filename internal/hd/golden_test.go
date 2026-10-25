@@ -83,7 +83,7 @@ func TestGolden(t *testing.T) {
 	if len(fixtures) == 0 {
 		t.Skip("no golden fixtures yet — add testdata/golden/*.json")
 	}
-	eng := NewEngine(swisseph.New(os.Getenv("SE_EPHE_PATH")), swisseph.Name+"-"+swisseph.Version, "")
+	eng := NewEngine(swisseph.New("../../ephe"), swisseph.Name+"-"+swisseph.Version, "")
 	for name, f := range fixtures {
 		t.Run(name, func(t *testing.T) {
 			c, err := eng.Chart(f.Request)
