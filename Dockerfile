@@ -10,7 +10,7 @@ RUN CGO_ENABLED=1 go build -trimpath -ldflags="-s -w" -o /out/hd-calc ./cmd/hd-c
 FROM alpine:3.22
 # tzdata is the source of historical time zones; its version goes into every response.
 RUN apk add --no-cache tzdata \
- && echo "TZDB_VERSION=$(head -1 /usr/share/zoneinfo/tzdata.zi | awk '{print $3}')" > /etc/tzdb.env
+ && echo "TZDB_VERSION=$(awk '/^P:tzdata$/{f=1} f&&/^V:/{sub(/^V:/,""); sub(/-r[0-9]+$/,""); print; exit}' /lib/apk/db/installed)" > /etc/tzdb.env
 WORKDIR /app
 COPY --from=build /out/hd-calc /app/hd-calc
 COPY ephe/ /app/ephe/
