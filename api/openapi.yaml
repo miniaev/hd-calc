@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Prisma calc-service
-  version: 0.2.0
+  version: 0.3.0
   summary: Расчёт карт Human Design. Чистая функция, без состояния.
   description: |
     Контракт между закрытым основным бэкендом Prisma и AGPL-сервисом расчёта
@@ -440,6 +440,13 @@ components:
           description: Ворота карты — номера из `Chart.gates[].gate`.
           uniqueItems: true
           items: { $ref: '#/components/schemas/Gate' }
+        exclude_bodies:
+          type: array
+          description: |
+            Тела, которые не учитываются. Для сводок за неделю и дольше
+            исключают Луну: она стоит в воротах всего несколько часов.
+          uniqueItems: true
+          items: { $ref: '#/components/schemas/Body' }
 
     TransitOverlay:
       type: object

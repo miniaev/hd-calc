@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/miniaev/hd-calc/internal/ephemeris"
 	"github.com/miniaev/hd-calc/internal/hd"
@@ -27,8 +28,8 @@ func New(cfg Config) http.Handler {
 	mux.HandleFunc("GET /v1/version", s.version)
 	mux.HandleFunc("POST /v1/chart", s.chart)
 	mux.HandleFunc("POST /v1/chart/range", s.chartRange)
-	mux.HandleFunc("GET /v1/transits", notImplemented)
-	mux.HandleFunc("POST /v1/transits/overlay", notImplemented)
+	mux.HandleFunc("GET /v1/transits", s.transits)
+	mux.HandleFunc("POST /v1/transits/overlay", s.overlay)
 	return mux
 }
 
@@ -78,6 +79,36 @@ func (s *server) chartRange(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
+func (s *server) transits(w http.ResponseWriter, r *http.Request) {
+	at, err := time.Parse(time.RFC3339, r.URL.Query().Get("at"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", "at: want RFC 3339 date-time")
+		return
+	}
+	t, err := s.cfg.Engine.Transits(at)
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, t)
+}
+
+func (s *server) overlay(w http.ResponseWriter, r *http.Request) {
+	var req hd.TransitOverlayRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
+		return
+	}
+	o, err := s.cfg.Engine.Overlay(req)
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, o)
+}
+
 func writeEngineError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, hd.ErrInvalidInput):
@@ -91,10 +122,6 @@ func writeEngineError(w http.ResponseWriter, err error) {
 	default:
 		writeError(w, http.StatusInternalServerError, "internal", err.Error())
 	}
-}
-
-func notImplemented(w http.ResponseWriter, _ *http.Request) {
-	writeError(w, http.StatusNotImplemented, "internal", "not implemented yet")
 }
 
 func writeError(w http.ResponseWriter, status int, code, msg string) {
