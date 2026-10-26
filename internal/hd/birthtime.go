@@ -13,6 +13,13 @@ import (
 //   - nonexistent (clocks jumped forward): shifted forward by the jump,
 //     i.e. read with the offset in force before the change.
 func resolveLocal(local, tz string) (time.Time, []TimeWarning, error) {
+	return resolveLocalPick(local, tz, false)
+}
+
+// resolveLocalPick is resolveLocal with a choice for the ambiguous case:
+// late=true takes the later instant (used for the end of a range, so a
+// doubled hour widens the interval instead of shrinking it).
+func resolveLocalPick(local, tz string, late bool) (time.Time, []TimeWarning, error) {
 	loc, err := time.LoadLocation(tz)
 	if err != nil || tz == "" || tz == "Local" {
 		return time.Time{}, nil, fmt.Errorf("%w: %q", ErrUnknownTimezone, tz)
@@ -46,13 +53,13 @@ func resolveLocal(local, tz string) (time.Time, []TimeWarning, error) {
 	case 1:
 		return valid[0], nil, nil
 	default:
-		earliest := valid[0]
+		pick := valid[0]
 		for _, v := range valid[1:] {
-			if v.Before(earliest) {
-				earliest = v
+			if v.Before(pick) != late {
+				pick = v
 			}
 		}
-		return earliest, []TimeWarning{{Code: "ambiguous_local_time", Local: local}}, nil
+		return pick, []TimeWarning{{Code: "ambiguous_local_time", Local: local}}, nil
 	}
 }
 

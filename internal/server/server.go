@@ -26,7 +26,7 @@ func New(cfg Config) http.Handler {
 	})
 	mux.HandleFunc("GET /v1/version", s.version)
 	mux.HandleFunc("POST /v1/chart", s.chart)
-	mux.HandleFunc("POST /v1/chart/range", notImplemented)
+	mux.HandleFunc("POST /v1/chart/range", s.chartRange)
 	mux.HandleFunc("GET /v1/transits", notImplemented)
 	mux.HandleFunc("POST /v1/transits/overlay", notImplemented)
 	return mux
@@ -62,10 +62,28 @@ func (s *server) chart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, c)
 }
 
+func (s *server) chartRange(w http.ResponseWriter, r *http.Request) {
+	var req hd.ChartRangeRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
+		return
+	}
+	c, err := s.cfg.Engine.ChartRange(req)
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
 func writeEngineError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, hd.ErrInvalidInput):
 		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
+	case errors.Is(err, hd.ErrIntervalTooLong):
+		writeError(w, http.StatusUnprocessableEntity, "interval_too_long", err.Error())
 	case errors.Is(err, hd.ErrUnknownTimezone):
 		writeError(w, http.StatusUnprocessableEntity, "unknown_timezone", err.Error())
 	case errors.Is(err, ephemeris.ErrOutOfRange):

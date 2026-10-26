@@ -20,6 +20,7 @@ const CalcVersion = "0.1.0"
 var (
 	ErrInvalidInput    = errors.New("invalid input")
 	ErrUnknownTimezone = errors.New("unknown time zone")
+	ErrIntervalTooLong = errors.New("interval too long")
 )
 
 // designArc is how far the Sun moves back from birth to the Design moment.
@@ -46,6 +47,11 @@ func (e *Engine) Chart(req ChartRequest) (*Chart, error) {
 	if err != nil {
 		return nil, err
 	}
+	return e.chartAt(req, birth, warnings)
+}
+
+// chartAt computes the chart for a resolved UTC birth instant.
+func (e *Engine) chartAt(req ChartRequest, birth time.Time, warnings []TimeWarning) (*Chart, error) {
 	jd := ephemeris.JulianDayUT(birth)
 	pers, err := e.activations(jd)
 	if err != nil {

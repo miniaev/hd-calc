@@ -46,8 +46,8 @@ docker build -t hd-calc . && docker run --rm -p 8080:8080 hd-calc
 
 ## Status
 
-`/v1/chart` works (Swiss Ephemeris 2.10.03, DE441 files for 1800–2400, true lunar node).
-`/v1/chart/range`, `/v1/transits` and `/v1/transits/overlay` answer `501` for now.
+`/v1/chart` and `/v1/chart/range` work (Swiss Ephemeris 2.10.03, DE441 files for 1800–2400, true lunar node).
+`/v1/transits` and `/v1/transits/overlay` answer `501` for now.
 
 `testdata/candidates.json` lists 26 charts picked to cover the golden checklist; each becomes
 a golden fixture once cross-checked against public calculators.
