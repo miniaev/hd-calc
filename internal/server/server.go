@@ -30,6 +30,7 @@ func New(cfg Config) http.Handler {
 	mux.HandleFunc("POST /v1/chart/range", s.chartRange)
 	mux.HandleFunc("GET /v1/transits", s.transits)
 	mux.HandleFunc("POST /v1/transits/overlay", s.overlay)
+	mux.HandleFunc("POST /v1/composite", s.composite)
 	return mux
 }
 
@@ -107,6 +108,22 @@ func (s *server) overlay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, o)
+}
+
+func (s *server) composite(w http.ResponseWriter, r *http.Request) {
+	var req hd.CompositeRequest
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_input", err.Error())
+		return
+	}
+	c, err := s.cfg.Engine.Composite(req)
+	if err != nil {
+		writeEngineError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
 }
 
 func writeEngineError(w http.ResponseWriter, err error) {

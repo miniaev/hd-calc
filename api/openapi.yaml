@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Prisma calc-service
-  version: 0.3.0
+  version: 0.4.0
   summary: Расчёт карт Human Design. Чистая функция, без состояния.
   description: |
     Контракт между закрытым основным бэкендом Prisma и AGPL-сервисом расчёта
@@ -139,6 +139,35 @@ paths:
               schema: { $ref: '#/components/schemas/TransitOverlay' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '422': { $ref: '#/components/responses/Unprocessable' }
+
+  /v1/composite:
+    post:
+      operationId: composite
+      summary: Как 2–5 карт работают вместе
+      description: |
+        Объединяет ворота участников. Для пары каждый образованный канал
+        получает категорию: electromagnetic (у каждого по воротам — притяжение),
+        companionship (канал целиком у обоих), dominance (у одного целиком,
+        у другого ни одних ворот), compromise (у одного целиком, у другого
+        одни ворота — трение). Для 3–5 человек добавляется Пента: шесть каналов
+        Горло–G–Сакрал и недостающие ворота. `impact` — что группа теряет без
+        каждого участника.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CompositeRequest' }
+            example:
+              members:
+                - gates: [1, 8, 13, 20, 34]
+                - gates: [7, 31, 57, 10]
+      responses:
+        '200':
+          description: Карта пары или группы
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Composite' }
+        '400': { $ref: '#/components/responses/BadRequest' }
 
   /v1/version:
     get:
@@ -447,6 +476,87 @@ components:
             исключают Луну: она стоит в воротах всего несколько часов.
           uniqueItems: true
           items: { $ref: '#/components/schemas/Body' }
+
+    CompositeRequest:
+      type: object
+      required: [members]
+      additionalProperties: false
+      properties:
+        members:
+          type: array
+          minItems: 2
+          maxItems: 5
+          items:
+            type: object
+            required: [gates]
+            additionalProperties: false
+            properties:
+              gates:
+                type: array
+                description: Ворота участника — номера из `Chart.gates[].gate`.
+                items: { $ref: '#/components/schemas/Gate' }
+
+    Composite:
+      type: object
+      required: [engine_version, members, group, channels, impact]
+      properties:
+        engine_version: { $ref: '#/components/schemas/EngineVersion' }
+        members: { type: integer, minimum: 2, maximum: 5 }
+        group:
+          type: object
+          required: [gates, centers, type, authority, definition, channels]
+          properties:
+            gates: { type: array, items: { $ref: '#/components/schemas/Gate' } }
+            centers: { $ref: '#/components/schemas/Centers' }
+            type: { $ref: '#/components/schemas/HDType' }
+            authority: { $ref: '#/components/schemas/Authority' }
+            definition: { $ref: '#/components/schemas/Definition' }
+            channels: { type: array, items: { $ref: '#/components/schemas/ChannelId' } }
+        channels:
+          type: array
+          description: Каналы, определённые в объединённой карте.
+          items:
+            type: object
+            required: [id, holders, whole]
+            properties:
+              id: { $ref: '#/components/schemas/ChannelId' }
+              kind:
+                type: string
+                enum: [electromagnetic, companionship, dominance, compromise]
+                description: Только для пары.
+              holders:
+                type: array
+                minItems: 2
+                maxItems: 2
+                description: Для каждого из двух ворот канала — индексы участников (с 0), у кого они есть.
+                items: { type: array, items: { type: integer } }
+              whole:
+                type: array
+                description: У кого канал есть целиком в своей карте.
+                items: { type: integer }
+        penta:
+          type: object
+          description: Только для 3–5 участников.
+          required: [channels, missing_gates]
+          properties:
+            channels:
+              type: array
+              items:
+                type: object
+                required: [id, formed]
+                properties:
+                  id: { $ref: '#/components/schemas/ChannelId' }
+                  formed: { type: boolean }
+            missing_gates: { type: array, items: { $ref: '#/components/schemas/Gate' } }
+        impact:
+          type: array
+          items:
+            type: object
+            required: [member, lost_channels, lost_centers]
+            properties:
+              member: { type: integer }
+              lost_channels: { type: array, items: { $ref: '#/components/schemas/ChannelId' } }
+              lost_centers: { type: array, items: { $ref: '#/components/schemas/Center' } }
 
     TransitOverlay:
       type: object
